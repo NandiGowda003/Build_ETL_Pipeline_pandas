@@ -1,0 +1,32 @@
+# Project Architecture
+            +-------------------+
+            |   PostgreSQL DB   |
+            | grocery_sales     |
+            +-------------------+
+                      |
+                      v
+            +-------------------+
+            |   Extract (Python)|
+            | pandas + psycopg2 |
+            +-------------------+
+                      |
+                      v
+            +-------------------+
+            |   Transform       |
+            | cleaning, holiday |
+            | tagging, metrics  |
+            +-------------------+
+                      |
+                      v
+            +-------------------+
+            |   Load            |
+            | CSV/Parquet files |
+            | warehouse/lake    |
+            +-------------------+
+                      |
+                      v
+            +-------------------+
+            |   Analysis        |
+            |  Notebook         |
+            | charts & insights |
+            +-------------------+
