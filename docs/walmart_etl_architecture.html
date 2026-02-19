@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Walmart Holiday Sales — ETL Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e3a5f;
+    --blue: #0ea5e9;
+    --blue-dim: #0369a1;
+    --cyan: #22d3ee;
+    --green: #10b981;
+    --yellow: #f59e0b;
+    --orange: #f97316;
+    --red: #ef4444;
+    --purple: #a855f7;
+    --text: #e2e8f0;
+    --text-dim: #64748b;
+    --text-muted: #334155;
+    --walmart-blue: #0071ce;
+    --walmart-yellow: #ffc220;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* GRID BACKGROUND */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(14,165,233,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(14,165,233,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* HEADER */
+  .header {
+    text-align: center;
+    margin-bottom: 48px;
+    animation: fadeDown 0.6s ease both;
+  }
+  .header .badge {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--walmart-yellow);
+    border: 1px solid var(--walmart-yellow);
+    border-radius: 2px;
+    padding: 3px 10px;
+    margin-bottom: 16px;
+  }
+  .header h1 {
+    font-size: clamp(22px, 4vw, 34px);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  .header h1 span { color: var(--walmart-yellow); }
+  .header p {
+    margin-top: 10px;
+    color: var(--text-dim);
+    font-size: 14px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* DIAGRAM CONTAINER */
+  .diagram {
+    display: grid;
+    grid-template-columns: 1fr 48px 1fr 48px 1fr 48px 1fr;
+    gap: 0;
+    align-items: start;
+    margin-bottom: 48px;
+  }
+
+  /* PHASE COLUMNS */
+  .phase {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    animation: fadeUp 0.5s ease both;
+  }
+  .phase:nth-child(3) { animation-delay: 0.1s; }
+  .phase:nth-child(5) { animation-delay: 0.2s; }
+  .phase:nth-child(7) { animation-delay: 0.3s; }
+
+  .phase-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 6px 0;
+    border-radius: 2px;
+    margin-bottom: 4px;
+  }
+  .phase-label.extract { color: var(--blue); border-bottom: 2px solid var(--blue); }
+  .phase-label.transform { color: var(--orange); border-bottom: 2px solid var(--orange); }
+  .phase-label.load { color: var(--green); border-bottom: 2px solid var(--green); }
+  .phase-label.validate { color: var(--purple); border-bottom: 2px solid var(--purple); }
+
+  /* CARDS */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13px;
+    transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    cursor: default;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 6px 0 0 6px;
+  }
+  .card.extract::before { background: var(--blue); }
+  .card.transform::before { background: var(--orange); }
+  .card.load::before { background: var(--green); }
+  .card.validate::before { background: var(--purple); }
+
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .card.extract:hover { border-color: var(--blue); }
+  .card.transform:hover { border-color: var(--orange); }
+  .card.load:hover { border-color: var(--green); }
+  .card.validate:hover { border-color: var(--purple); }
+
+  .card-icon { font-size: 18px; margin-bottom: 6px; }
+  .card-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .card.extract .card-title { color: var(--blue); }
+  .card.transform .card-title { color: var(--orange); }
+  .card.load .card-title { color: var(--green); }
+  .card.validate .card-title { color: var(--purple); }
+
+  .card-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .card-tag {
+    display: inline-block;
+    margin-top: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    background: var(--surface2);
+    border-radius: 2px;
+    padding: 2px 6px;
+    color: var(--text-dim);
+  }
+
+  /* ARROW CONNECTORS */
+  .arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 52px;
+    animation: fadeIn 0.5s ease 0.4s both;
+  }
+  .arrow-line {
+    position: relative;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, var(--border), var(--blue-dim));
+  }
+  .arrow-line::after {
+    content: '▶';
+    position: absolute;
+    right: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--blue-dim);
+    font-size: 10px;
+  }
+
+  /* HOLIDAY FLAGS */
+  .holidays {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 32px;
+    animation: fadeUp 0.5s ease 0.4s both;
+  }
+  .holidays-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--walmart-yellow);
+    margin-bottom: 12px;
+  }
+  .holiday-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    transition: border-color 0.2s;
+  }
+  .chip:hover { border-color: var(--walmart-yellow); }
+
+  /* TECH STACK ROW */
+  .stack {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 40px;
+    animation: fadeUp 0.5s ease 0.5s both;
+  }
+  .stack-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--text-dim);
+  }
+  .stack-item .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+  }
+
+  /* EASTER EGG HINT */
+  .hint {
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 24px;
+    letter-spacing: 0.1em;
+    animation: fadeIn 1s ease 1.5s both;
+  }
+
+  /* ========== EASTER EGG ========== */
+  #egg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.92);
+    z-index: 999;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  #egg.active { display: flex; animation: eggPop 0.4s ease; }
+
+  .egg-terminal {
+    background: #0d1117;
+    border: 1px solid #30d5c8;
+    border-radius: 8px;
+    padding: 32px 40px;
+    max-width: 560px;
+    width: 90%;
+    box-shadow: 0 0 60px rgba(48,213,200,0.15);
+    position: relative;
+  }
+  .egg-topbar {
+    display: flex;
+    gap: 7px;
+    margin-bottom: 20px;
+  }
+  .egg-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .egg-dot:nth-child(1) { background: #ff5f57; }
+  .egg-dot:nth-child(2) { background: #ffbd2e; }
+  .egg-dot:nth-child(3) { background: #28ca41; }
+  .egg-prompt {
+    color: #30d5c8;
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+  .egg-prompt span { color: #a855f7; }
+  .egg-output {
+    font-size: 13px;
+    line-height: 1.8;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+  }
+  .egg-output .highlight { color: #ffc220; font-weight: 700; }
+  .egg-output .green { color: #10b981; }
+  .egg-output .blue { color: #38bdf8; }
+  .egg-output .dim { color: #475569; }
+  .egg-close {
+    margin-top: 20px;
+    font-size: 11px;
+    color: #475569;
+    text-align: center;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+  }
+  .egg-close:hover { color: #94a3b8; }
+
+  .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    background: #30d5c8;
+    vertical-align: middle;
+    animation: blink 1s step-end infinite;
+  }
+
+  /* KONAMI progress */
+  #konami-indicator {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.15em;
+    transition: color 0.3s;
+    z-index: 100;
+  }
+
+  /* ANIMATIONS */
+  @keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes eggPop {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  @media (max-width: 700px) {
+    .diagram {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .arrow { display: none; }
+    .phase { gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="badge">&#x25A0; Walmart Grocery Analytics</div>
+    <h1>Holiday Sales <span>ETL Architecture</span></h1>
+    <p>// Supply & demand pipeline · PostgreSQL → Python → CSV/Parquet</p>
+  </div>
+
+  <!-- HOLIDAY FLAGS -->
+  <div class="holidays">
+    <div class="holidays-title">&#x25C6; Tagged Holiday Events</div>
+    <div class="holiday-chips">
+      <div class="chip">🏈 Super Bowl</div>
+      <div class="chip">⛱️ Labor Day</div>
+      <div class="chip">🦃 Thanksgiving</div>
+      <div class="chip">🎄 Christmas</div>
+      <div class="chip">📊 Baseline Windows</div>
+      <div class="chip">⚡ Demand Spike Flags</div>
+    </div>
+  </div>
+
+  <!-- MAIN DIAGRAM -->
+  <div class="diagram">
+
+    <!-- EXTRACT -->
+    <div class="phase">
+      <div class="phase-label extract">01 · Extract</div>
+      <div class="card extract">
+        <div class="card-icon">🗄️</div>
+        <div class="card-title">PostgreSQL</div>
+        <div class="card-desc">Connect & query <code>grocery_sales</code> table — product, store, date, sales metrics</div>
+        <span class="card-tag">psycopg2 / SQLAlchemy</span>
+      </div>
+      <div class="card extract">
+        <div class="card-icon">📅</div>
+        <div class="card-title">Holiday Calendar</div>
+        <div class="card-desc">Complementary CSV with holiday dates & external demand indicators</div>
+        <span class="card-tag">pandas.read_csv()</span>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="arrow-line"></div></div>
+
+    <!-- TRANSFORM -->
+    <div class="phase">
+      <div class="phase-label transform">02 · Transform</div>
+      <div class="card transform">
+        <div class="card-icon">🧹</div>
+        <div class="card-title">Clean</div>
+        <div class="card-desc">Handle missing values, parse dates, normalize store IDs</div>
+        <span class="card-tag">df.fillna() · dropna()</span>
+      </div>
+      <div class="card transform">
+        <div class="card-icon">📦</div>
+        <div class="card-title">Aggregate</div>
+        <div class="card-desc">Group by date, store, product — sum weekly_sales, avg markdowns</div>
+        <span class="card-tag">groupby().agg()</span>
+      </div>
+      <div class="card transform">
+        <div class="card-icon">🏷️</div>
+        <div class="card-title">Flag & Enrich</div>
+        <div class="card-desc">Tag holiday windows · compute demand spikes vs rolling baseline</div>
+        <span class="card-tag">merge() · rolling()</span>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="arrow-line"></div></div>
+
+    <!-- LOAD -->
+    <div class="phase">
+      <div class="phase-label load">03 · Load</div>
+      <div class="card load">
+        <div class="card-icon">📁</div>
+        <div class="card-title">CSV / Parquet</div>
+        <div class="card-desc">Write transformed output for downstream analysis and forecasting</div>
+        <span class="card-tag">to_csv() · to_parquet()</span>
+      </div>
+      <div class="card load">
+        <div class="card-icon">🏗️</div>
+        <div class="card-title">Data Warehouse</div>
+        <div class="card-desc">Optional load into Snowflake, BigQuery, or Redshift for scale</div>
+        <span class="card-tag">optional · future phase</span>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="arrow-line"></div></div>
+
+    <!-- VALIDATE -->
+    <div class="phase">
+      <div class="phase-label validate">04 · Validate</div>
+      <div class="card validate">
+        <div class="card-icon">✅</div>
+        <div class="card-title">Schema Checks</div>
+        <div class="card-desc">Assert column types, null thresholds, date range completeness</div>
+        <span class="card-tag">assert · pytest</span>
+      </div>
+      <div class="card validate">
+        <div class="card-icon">📉</div>
+        <div class="card-title">Sanity Tests</div>
+        <div class="card-desc">Verify holiday flags exist, spike values > 0, row counts match expectations</div>
+        <span class="card-tag">validate_etl()</span>
+      </div>
+      <div class="card validate">
+        <div class="card-icon">📊</div>
+        <div class="card-title">Output QA</div>
+        <div class="card-desc">Compare loaded row counts to source, flag anomalies in spike ratio</div>
+        <span class="card-tag">logging · alerts</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TECH STACK -->
+  <div class="stack">
+    <div class="stack-item"><span class="dot" style="background:#3776ab"></span>Python 3.x</div>
+    <div class="stack-item"><span class="dot" style="background:#150458"></span>Pandas</div>
+    <div class="stack-item"><span class="dot" style="background:#336791"></span>PostgreSQL</div>
+    <div class="stack-item"><span class="dot" style="background:#e97627"></span>Matplotlib</div>
+    <div class="stack-item"><span class="dot" style="background:#4c72b0"></span>Seaborn</div>
+    <div class="stack-item"><span class="dot" style="background:#ffc220"></span>Walmart Holiday Data</div>
+  </div>
+
+  <div class="hint">// psst: try ↑ ↑ ↓ ↓ ← → ← → B A &nbsp;·&nbsp; you didn't hear it from me</div>
+
+</div>
+
+<!-- ============ EASTER EGG ============ -->
+<div id="egg">
+  <div class="egg-terminal">
+    <div class="egg-topbar">
+      <div class="egg-dot"></div>
+      <div class="egg-dot"></div>
+      <div class="egg-dot"></div>
+    </div>
+    <div class="egg-prompt">$ <span>python</span> walmart_etl.py --mode=holiday --debug</div>
+    <div class="egg-output" id="egg-text"></div>
+    <div class="egg-close" onclick="closeEgg()">[ press ESC or click to close ]</div>
+  </div>
+</div>
+
+<div id="konami-indicator"></div>
+
+<script>
+  // ── KONAMI CODE EASTER EGG ──────────────────────────────────
+  const KONAMI = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
+  const SYMBOLS = ['↑','↑','↓','↓','←','→','←','→','B','A'];
+  let idx = 0;
+
+  const indicator = document.getElementById('konami-indicator');
+
+  document.addEventListener('keydown', e => {
+    if (e.key === KONAMI[idx]) {
+      idx++;
+      indicator.textContent = SYMBOLS.slice(0, idx).join(' ');
+      indicator.style.color = idx === KONAMI.length ? '#ffc220' : '#1e3a5f';
+      if (idx === KONAMI.length) {
+        idx = 0;
+        setTimeout(() => indicator.textContent = '', 800);
+        triggerEgg();
+      }
+    } else {
+      idx = 0;
+      indicator.textContent = '';
+      indicator.style.color = '#1e3a5f';
+    }
+
+    if (e.key === 'Escape') closeEgg();
+  });
+
+  const LINES = [
+    { text: '[INFO]  Connecting to PostgreSQL... ', delay: 0, class: 'blue' },
+    { text: '✓ grocery_sales: 421,570 rows loaded', delay: 400, class: 'green' },
+    { text: '[INFO]  Merging holiday calendar...', delay: 800, class: 'blue' },
+    { text: '✓ Tagged: 🏈 Super Bowl (Feb), ⛱ Labor Day (Sep)', delay: 1100 },
+    { text: '✓ Tagged: 🦃 Thanksgiving (Nov), 🎄 Christmas (Dec)', delay: 1300 },
+    { text: '[INFO]  Computing demand spikes vs baseline...', delay: 1700, class: 'blue' },
+    { text: '⚡ Thanksgiving spike: +312% on frozen turkeys', delay: 2100, class: 'highlight' },
+    { text: '⚡ Super Bowl spike:   +287% on chips & dips', delay: 2400, class: 'highlight' },
+    { text: '⚡ Christmas spike:    +198% on baking supplies', delay: 2700, class: 'highlight' },
+    { text: '', delay: 3000 },
+    { text: '[VALIDATE] Running validate_etl()...', delay: 3100, class: 'blue' },
+    { text: '  ✓ Schema OK          ✓ No nulls in key cols', delay: 3400, class: 'green' },
+    { text: '  ✓ Holiday flags OK   ✓ Spike ratios sane', delay: 3600, class: 'green' },
+    { text: '  ✓ Row count matches source (diff: 0)', delay: 3800, class: 'green' },
+    { text: '', delay: 4100 },
+    { text: '🎉 ETL pipeline complete. Output saved.', delay: 4200, class: 'highlight' },
+    { text: '', delay: 4500 },
+    { text: '────────────────────────────────────────', delay: 4600, class: 'dim' },
+    { text: '  Fun fact: Walmart sells ~46M turkeys', delay: 4800 },
+    { text: '  in the week before Thanksgiving alone.', delay: 5000 },
+    { text: '  That\'s one bird per ~7 Americans. 🦃', delay: 5200 },
+    { text: '', delay: 5500 },
+    { text: '  You found the Easter egg. Congrats,', delay: 5600 },
+    { text: '  you absolute 10x data engineer. 🫡', delay: 5900, class: 'highlight' },
+    { text: '────────────────────────────────────────', delay: 6200, class: 'dim' },
+  ];
+
+  let eggTimers = [];
+
+  function triggerEgg() {
+    const egg = document.getElementById('egg');
+    const textEl = document.getElementById('egg-text');
+    textEl.innerHTML = '';
+    eggTimers.forEach(clearTimeout);
+    eggTimers = [];
+    egg.classList.add('active');
+
+    LINES.forEach(line => {
+      const t = setTimeout(() => {
+        const span = document.createElement('div');
+        span.className = line.class || '';
+        span.textContent = line.text;
+        textEl.appendChild(span);
+        textEl.scrollTop = textEl.scrollHeight;
+      }, line.delay);
+      eggTimers.push(t);
+    });
+  }
+
+  function closeEgg() {
+    document.getElementById('egg').classList.remove('active');
+    eggTimers.forEach(clearTimeout);
+  }
+
+  document.getElementById('egg').addEventListener('click', e => {
+    if (e.target === document.getElementById('egg')) closeEgg();
+  });
+</script>
+</body>
+</html>
